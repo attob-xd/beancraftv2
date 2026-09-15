@@ -1,18 +1,3 @@
-# Build output
-build/
+# Website repository - the client build lives here, nothing else.
 .gradle/
-libs-1.18.2-derived/
-javascript/classes.js
-javascript/classes.build.js
-javascript/classes.js.map
 *.log
-hs_err_pid*.log
-replay_pid*.log
-
-# Mojang's material - NOT redistributable. The game's own title screen says
-# "Copyright Mojang AB. Do not distribute!". Anyone building this fork supplies
-# their own 1.18.2 jar and assets; see README.
-libs-1.18.2/
-decompiled-1.18.2-reference/
-desktopRuntime/resources/
-javascript/assets.epk
