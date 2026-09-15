@@ -1,3 +1,18 @@
-# Website repository - the client build lives here, nothing else.
+# Website-only repository. The fork's source is kept elsewhere.
+src/
+tools/
+gradle/
+gradlew
+gradlew.bat
+build.gradle
+gradle.properties
+settings.gradle
+CompileJS.sh
+CompileEPK.sh
+MakeOfflineDownload.sh
+ORPHANED_OVERRIDES.txt
+BUILDING.md
+DEPLOY.md
+javascript/
 .gradle/
 *.log
