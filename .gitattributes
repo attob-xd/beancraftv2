@@ -1,0 +1,9 @@
+# classes.js is a 66 MB generated artifact. Git must never touch its line endings.
+#
+# Without this, core.autocrlf rewrote every LF to CRLF on checkout and the served file grew
+# by about 256 KB of pure noise - and a single stray byte in this file is not cosmetic: the
+# whole script fails to parse and the page goes black with "Unexpected number" and nothing
+# else to go on. Marking it binary also stops Git trying to diff 66 MB of one-line JavaScript.
+classes.js binary
+assets.epk binary
+*.png binary
