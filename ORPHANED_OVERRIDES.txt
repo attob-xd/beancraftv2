@@ -1,0 +1,67 @@
+Methods that no longer override a Minecraft hook in 1.18.2.
+They still compile and are still called by EaglercraftX code that calls them
+directly, but vanilla will never invoke them - each needs re-attaching to its
+1.18.2 counterpart.
+
+net/lax1dude/eaglercraft/minecraft/EaglerFolderResourcePack.java
+    public Set<String> getResourceDomains()
+net/lax1dude/eaglercraft/minecraft/EaglerFolderResourcePack.java
+    protected InputStream getInputStreamByName(String var1) throws IOException
+net/lax1dude/eaglercraft/minecraft/EaglerFolderResourcePack.java
+    protected boolean hasResourceName(String var1)
+net/lax1dude/eaglercraft/minecraft/GuiScreenVisualViewport.java
+    public final void setWorldAndResolution(Minecraft minecraft, int width, int height)
+net/lax1dude/eaglercraft/minecraft/GuiScreenVisualViewport.java
+    protected final void mouseClicked(int parInt1, int parInt2, int parInt3) throws IOException
+net/lax1dude/eaglercraft/minecraft/GuiScreenVisualViewport.java
+    protected final void mouseReleased(int i, int j, int k)
+net/lax1dude/eaglercraft/minecraft/GuiScreenVisualViewport.java
+    protected final void mouseClickMove(int var1, int var2, int var3, long var4)
+net/lax1dude/eaglercraft/minecraft/MainMenuSkyboxTexture.java
+    public void loadTexture(ResourceManager var1) throws IOException
+net/lax1dude/eaglercraft/sp/server/EaglerChunkLoader.java
+    public LevelChunk loadChunk(Level var1, int var2, int var3) throws IOException
+net/lax1dude/eaglercraft/sp/server/EaglerChunkLoader.java
+    public void saveChunk(Level var1, LevelChunk var2) throws IOException, MinecraftException
+net/lax1dude/eaglercraft/sp/server/EaglerChunkLoader.java
+    public void saveExtraChunkData(Level var1, LevelChunk var2) throws IOException
+net/lax1dude/eaglercraft/sp/server/EaglerChunkLoader.java
+    public void chunkTick()
+net/lax1dude/eaglercraft/sp/server/EaglerChunkLoader.java
+    public void saveExtraData()
+net/lax1dude/eaglercraft/sp/server/EaglerMinecraftServer.java
+    public void addScheduledTask(Runnable var1)
+net/lax1dude/eaglercraft/sp/server/EaglerMinecraftServer.java
+    public boolean startServer() throws IOException
+net/lax1dude/eaglercraft/sp/server/EaglerMinecraftServer.java
+    public boolean canStructuresSpawn()
+net/lax1dude/eaglercraft/sp/server/EaglerMinecraftServer.java
+    public GameType getGameType()
+net/lax1dude/eaglercraft/sp/server/EaglerMinecraftServer.java
+    public Difficulty getDifficulty()
+net/lax1dude/eaglercraft/sp/server/EaglerMinecraftServer.java
+    public int getOpPermissionLevel()
+net/lax1dude/eaglercraft/sp/server/EaglerMinecraftServer.java
+    public boolean shouldBroadcastRconToOps()
+net/lax1dude/eaglercraft/sp/server/EaglerMinecraftServer.java
+    public boolean shouldBroadcastConsoleToOps()
+net/lax1dude/eaglercraft/sp/server/EaglerSaveFormat.java
+    public LevelStorageAccess getSaveLoader(String s, boolean flag)
+net/lax1dude/eaglercraft/sp/server/EaglerSaveFormat.java
+    public List<LevelSummary> getSaveList() throws AnvilConverterException
+net/lax1dude/eaglercraft/sp/server/EaglerSaveHandler.java
+    public ChunkStorage getChunkLoader(DimensionType provider)
+net/lax1dude/eaglercraft/sp/server/EaglerSaveHandler.java
+    public void saveWorldInfoWithPlayer(LevelData worldInformation, CompoundTag tagCompound)
+net/lax1dude/eaglercraft/sp/server/EaglerSaveHandler.java
+    public void saveWorldInfo(LevelData worldInformation)
+net/lax1dude/eaglercraft/sp/server/socket/NetHandlerHandshakeEagler.java
+    public void processHandshake(ClientIntentionPacket var1)
+net/lax1dude/eaglercraft/sp/socket/NetHandlerSingleplayerLogin.java
+    public void handleEncryptionRequest(ClientboundHelloPacket var1)
+net/lax1dude/eaglercraft/sp/socket/NetHandlerSingleplayerLogin.java
+    public void handleLoginSuccess(ClientboundGameProfilePacket var1)
+net/lax1dude/eaglercraft/sp/socket/NetHandlerSingleplayerLogin.java
+    public void handleEnableCompression(ClientboundLoginCompressionPacket var1)
+net/lax1dude/eaglercraft/webview/GuiScreenPhishingWarning.java
+    protected void mouseClicked(int mx, int my, int btn) throws IOException

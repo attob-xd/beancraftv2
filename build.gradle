@@ -1,0 +1,406 @@
+import org.teavm.gradle.api.OptimizationLevel
+
+buildscript {
+    dependencies {
+        classpath files("src/teavmc-classpath/resources")
+    }
+}
+
+plugins {
+    id "java"
+    id "eclipse"
+    id "org.teavm" version "0.9.2"
+}
+
+// teavm-jso-apis is replaced wholesale by a trimmed copy (see tools/trim_teavm_jso.sh), so
+// the real one must not arrive by any route - it is a transitive dependency of
+// teavm-classlib as well as a direct one.
+configurations.configureEach {
+    exclude group: 'org.teavm', module: 'teavm-jso-apis'
+    // Same for teavm-classlib: src/nio-shim replaces TRuntime (upstream has no
+    // availableProcessors, which Minecraft's Util needs in a static initialiser) and
+    // TSpliterators (upstream has no nested AbstractSpliterator, which vanilla subclasses).
+    // The jar's copies win over ours regardless of classpath order, so the jar is replaced
+    // by a trimmed one - see tools/trim_teavm_jso.sh.
+    exclude group: 'org.teavm', module: 'teavm-classlib'
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs(
+		"src/main/java",
+                "src/game/java",
+               	"src/protocol-game/java",
+		"src/teavm/java"
+            )
+        }
+    }
+    eagler {
+        java {
+	    srcDir 'src/main/java'
+            srcDir 'src/game/java'
+            srcDir 'src/protocol-game/java'
+	    srcDir 'src/lwjgl/java'
+        }
+    }
+}
+
+// The java.nio.file shim. TeaVM's classlib declares includePackageHierarchy|java=false,
+// so a real java.* package on the classpath is invisible to it; the supported way in is
+// org.teavm.classlib.java.*, which its own teavm.properties maps back (stripping the T
+// prefix). It compiles separately only to keep it off the main source set - main resolves
+// java.nio.file from the real JDK, and only TeaVM ever sees these.
+sourceSets {
+    niofile {
+        java {
+            srcDirs = ['src/nio-shim/java']
+        }
+    }
+}
+
+compileNiofileJava {
+    options.encoding = 'UTF-8'
+    // Some shims answer with EaglercraftX's own platform layer rather than inventing a
+    // value - TRuntime reports memory through PlatformRuntime so that Runtime.freeMemory()
+    // and EagRuntime.freeMemory() cannot disagree. That needs main on the compile path.
+    // There is no cycle: main compiles against the real JDK, never against these.
+    dependsOn 'compileJava'
+    classpath += files(sourceSets.main.output)
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    teavm(teavm.libs.jso)
+    // jsoApis, minus IDBIndex - see tools/trim_teavm_jso.sh. Upstream's copy is refused by
+    // TeaVM's own @JSByRef validation, and a validation failure means NO output is written
+    // at all: the previous run's classes.js is left on disk, so a failed build looks exactly
+    // like a successful one until you check the file's contents.
+    teavm(files('libs-1.18.2-derived/teavm-jso-apis-trimmed.jar'))
+    // ...and on javac's path too: the exclusion above removes the real jar from every
+    // configuration, including the one the plugin folds into compileClasspath, so
+    // org.teavm.jso.dom.* would otherwise vanish from EaglercraftX's own TeaVM glue.
+    compileOnly files('libs-1.18.2-derived/teavm-jso-apis-trimmed.jar')
+    teavm(files('libs-1.18.2-derived/teavm-classlib-trimmed.jar'))
+    compileOnly files('libs-1.18.2-derived/teavm-classlib-trimmed.jar')
+    // A file dependency carries no metadata, so teavm-classlib's own dependencies have to
+    // be named again by hand - excluding the module took them with it. This is the list
+    // from its .module descriptor.
+    teavm 'org.teavm:teavm-platform:0.9.2'
+    teavm 'org.teavm:teavm-jso-impl:0.9.2'
+    teavm 'org.teavm:teavm-metaprogramming-impl:0.9.2'
+    // The trimmed copy, not the maven one. This line is a SECOND route onto TeaVM's
+    // classpath, and an untrimmed commons-io here silently beat src/main/java's Charsets even
+    // after the browserLibs entry had been swapped for the trimmed jar and the original
+    // excluded from compileOnly - the client still died in Charsets.<clinit> with the same
+    // NoSuchMethodError, from a copy nothing in libs-1.18.2 was responsible for.
+    // Whenever a class is replaced, check every configuration that can carry its jar, not
+    // just the obvious one.
+    teavm(files('libs-1.18.2-derived/commons-io-2.11.0-trimmed.jar'))
+    teavm 'com.jcraft:jzlib:1.1.3'
+    teavm 'joda-time:joda-time:2.12.2'
+    compileOnly 'org.teavm:teavm-platform:0.9.2'
+    compileOnly 'com.jcraft:jzlib:1.1.3'
+    compileOnly "org.teavm:teavm-core:0.9.2" // workaround for a few hacks
+
+    // 1.18.2's library set, split by what has to exist IN THE BROWSER.
+    //
+    // Everything here is on javac's classpath. Only `implementation` also reaches TeaVM,
+    // which compiles every reachable class to JavaScript - so a desktop-only library left
+    // in that list does not just bloat the output, it drags its whole world in. log4j-api
+    // is the sharpest example: AbstractLogger.createDefaultMessageFactory calls
+    // Class.newInstance(), TeaVM models that as "any class may be instantiated", and one
+    // logger construction pulled in Swing, java2d and the image codecs - 9,266 diagnostics
+    // from a single call. EaglercraftX vendors its own log4j (Logger/LogManager/Level) as
+    // source, and this project's classes are searched first, so dropping the jar is what
+    // lets that vendored one win.
+    def browserLibs = ['datafixerupper', 'brigadier', 'fastutil',
+                       'guava', 'failureaccess', 'commons-lang3',
+                       'commons-codec',
+                       // Small interface-only Mojang jars. They were compile-only at first,
+                       // but vanilla names their types in class metadata (Minecraft holds a
+                       // com.mojang.bridge.Launcher, the pack system a PackType), and TeaVM
+                       // evaluates metadata at load time - so an absent one is a
+                       // ReferenceError before the page starts, not a lazy failure.
+                       'javabridge', 'blocklist', 'text2speech',
+                       // JNA is desktop-only and nothing calls into it, but vanilla names its
+                       // pointer types in metadata, and metadata is evaluated when the page
+                       // loads. Only the named types get compiled - TeaVM emits what is
+                       // reachable, and no native call is.
+                       //
+                       // LWJGL sat in this list on the same reasoning and it was wrong.
+                       // RenderSystem.initBackendSystem() calls GLX._initGlfw(), which calls
+                       // GLFW.glfwInit(): the native calls really were reachable, and the
+                       // client died there before drawing a frame. It now comes from the
+                       // trimmed jars below instead, with this project's own GLFW, MemoryUtil
+                       // and GL11 in its place.
+                       'jna', 'java-objc-bridge',
+                       // OSHI reads CPU and memory from the host OS. None of it can run
+                       // here, but vanilla's SystemReport names its types, and this port's
+                       // replacement still compiles against the same signatures.
+                       'oshi-core']
+    implementation fileTree(dir: 'libs-1.18.2', include: '*.jar').filter { f ->
+        browserLibs.any { f.name.startsWith(it + '-') || f.name == it + '.jar' }
+    }
+    // netty, minus the packages a browser cannot reach - see tools/trim_netty.sh.
+    implementation files('libs-1.18.2-derived/netty-all-4.1.68.Final-trimmed.jar')
+    // authlib, minus the Yggdrasil session and user-API services - see tools/trim_lib.sh. Their
+    // constructor loads Mojang's session-signing key from a classpath resource and throws
+    // java.lang.Error when it is absent, which under TeaVM it always is.
+    implementation files('libs-1.18.2-derived/authlib-3.3.39-trimmed.jar')
+    // gson, minus TypeToken - see tools/trim_lib.sh and the replacement in src/main/java.
+    // Its constructor recovers a generic type argument by reflection, which TeaVM cannot do.
+    implementation files('libs-1.18.2-derived/gson-2.8.9-trimmed.jar')
+    // commons-io, minus Charsets and IOSupplier - see tools/trim_lib.sh. Charsets wraps its
+    // charset map with Collections.unmodifiableSortedMap, and TeaVM's Collections has no
+    // sorted or navigable unmodifiable view at all, so merely touching the class threw
+    // NoSuchMethodError. It surfaced as a shader failure rather than a charset one, because
+    // ShaderInstance reads every shader through IOUtils.toString(InputStream, Charset).
+    // IOSupplier was already replaced in src/main/java by a strict superset of the jar's, and
+    // had until now been relying on classpath order to win.
+    implementation files('libs-1.18.2-derived/commons-io-2.11.0-trimmed.jar')
+    // LWJGL, minus every class src/main/java/org/lwjgl replaces - see tools/trim_lwjgl.sh.
+    // What is left is the type surface vanilla names but never calls into: the GLFW callback
+    // interfaces, the STB and OpenAL bindings, the struct hierarchy.
+    implementation files('libs-1.18.2-derived/lwjgl-3.2.2-trimmed.jar',
+            'libs-1.18.2-derived/lwjgl-glfw-3.2.2-trimmed.jar',
+            'libs-1.18.2-derived/lwjgl-jemalloc-3.2.2-trimmed.jar',
+            'libs-1.18.2-derived/lwjgl-openal-3.2.2-trimmed.jar',
+            'libs-1.18.2-derived/lwjgl-opengl-3.2.2-trimmed.jar',
+            'libs-1.18.2-derived/lwjgl-stb-3.2.2-trimmed.jar',
+            'libs-1.18.2-derived/lwjgl-tinyfd-3.2.2-trimmed.jar')
+    // Vanilla, minus every class src/game/java replaces - see tools/trim_vanilla.sh. The
+    // jar was winning over this project's sources at TeaVM time no matter how the classpath
+    // was ordered, so the duplicates are removed rather than out-voted.
+    implementation files('libs-1.18.2-derived/1.18.2-mapped-trimmed.jar')
+    // The rest exist only so javac can resolve references from vanilla code that the
+    // browser never executes (LWJGL, JNA, OSHI, HttpClient, ICU4J, the Mojang launcher
+    // helpers). If TeaVM ever reports one of these as missing, that path really is
+    // reachable and needs an EaglercraftX replacement rather than the jar.
+    //
+    // log4j is excluded even from javac's view. EaglercraftX ships its own
+    // org.apache.logging.log4j.{LogManager,Logger,Level,ILogRedirector}, which carry
+    // members real log4j does not have (LogManager.logRedirector, the singleplayer
+    // worker's hook for piping worker logs back to the page). javac resolves a class
+    // that exists both as source and on the classpath by file date, so the 2021 jar
+    // silently won over lax1dude's source and broke that hook.
+    //
+    // The untrimmed LWJGL jars are excluded for the same reason as log4j: javac picks
+    // between a source file and a classpath class by date, so the 2019 jar was silently
+    // beating src/main/java/org/lwjgl. Only the trimmed jars are on the classpath, and they
+    // no longer contain the classes this project supplies.
+    // commons-io joins them for the same reason: src/main/java replaces Charsets and
+    // IOSupplier, and the trimmed jar above already carries everything else it has.
+    compileOnly fileTree(dir: 'libs-1.18.2', include: '*.jar',
+            exclude: ['log4j-*.jar', 'slf4j-*.jar', 'commons-logging-*.jar',
+                      'logging-*.jar', 'netty-all-*.jar', '1.18.2-mapped.jar',
+                      'lwjgl-*.jar', 'commons-compress-*.jar', 'commons-io-*.jar'])
+
+    eaglerImplementation fileTree(dir: './desktopRuntime/eclipseProject/deps_fix/', include: '*.jar')
+}
+
+// Porting 1.12.2 -> 1.18.2: javac stops at 100 errors by default, which hides the
+// shape of the remaining work.
+compileJava.options.compilerArgs += ["-Xmaxerrs", "100000", "-nowarn"]
+
+// The whole port rests on one rule: where a class exists both as source here and as a
+// class in a jar, the source wins. That is how a patched vanilla class (an
+// AnimationMetadataSection with 1.12.2's accessors added, an AbstractClientPlayer with
+// lax1dude's brand-UUID field) replaces the jar's, and how EaglercraftX's vendored guava,
+// netty buffers and log4j replace the real ones.
+//
+// javac's default for that case is -Xprefer:newer, which decides it by file date. That
+// held only by luck, and broke the moment an incremental compile passed a subset of the
+// sources: the 2021 authlib jar beat lax1dude's GameProfile, and the mapped jar beat the
+// patched AnimationMetadataSection, for 53 errors that had nothing to do with the edit
+// that triggered them. Stating the sourcepath and -Xprefer:source makes the rule explicit.
+compileJava.options.sourcepath = files("src/main/java", "src/game/java",
+        "src/protocol-game/java", "src/teavm/java")
+compileJava.options.compilerArgs += ["-Xprefer:source"]
+
+def folder = "javascript"
+// TeaVM truncates its output to zero and rewrites ~66 MB over half a minute. That file is
+// the one the web server hands to the browser, so anyone who reloaded during a build got a
+// partial script and a page that failed in a way that looks nothing like a build problem.
+// It is emitted under a staging name and moved onto classes.js by CompileJS.sh only after
+// the post-build checks pass, so the served file is always a whole, checked build.
+def name = "classes.build.js"
+
+teavm.js {
+    compileJava.options.encoding = "UTF-8"
+    // On. It was off while the port was being brought up, because "Be5 is not defined" says
+    // nothing where "ThreadFactory is not defined" says everything - but keeping every name
+    // costs memory the analysis needs, and once Bootstrap.bootStrap() became reachable the
+    // whole registry set came with it and 20 GB was no longer enough. EaglercraftX ships a
+    // runtime deobfuscator (it indexes ~35k class names at startup), so crash reports are
+    // still readable.
+    obfuscated = true
+    // Off for the same reason: the map for a build this size is hundreds of megabytes to
+    // hold. EaglercraftX indexes its own deobfuscation data at startup, so stack traces stay
+    // readable without it.
+    sourceMap = false
+    targetFileName = "../" + name
+    // NONE, not BALANCED. Once Bootstrap.bootStrap() became reachable the whole registry set
+    // came with it - blocks, items, entities, worldgen - and the optimiser no longer fit
+    // alongside the analysis: the compiler sat at 20 GB on a 31 GB machine with 0.7 GB free,
+    // burning 15% CPU in GC. Raising the limit would only swap. Optimisation level is the
+    // one lever here that costs output size rather than correctness. (The enum has exactly
+    // NONE, BALANCED and AGGRESSIVE - there is no SIMPLE.)
+    // BALANCED, not NONE. NONE emits a direct translation of the bytecode: no inlining, no
+    // devirtualization, no escape analysis - which is both slower to run and larger to ship,
+    // and 66 MB of JavaScript is itself a problem on a low-memory Chromebook before a frame is
+    // drawn. NONE was chosen because the precise analysis outgrew the build's memory once the
+    // registry set became reachable, NOT for correctness; processMemory is 24000 now and the
+    // TeaVM daemon has a real stack (see CompileJS.sh), so it is worth the build cost. If this
+    // exhausts memory, the failure is at build time and the served classes.js is untouched -
+    // CompileJS.sh only swaps it in after the checks pass.
+    optimization = OptimizationLevel.BALANCED
+    // TeaVM must NOT run inside the Gradle daemon. Its class reader delegates to the
+    // host process's classloader before its own classpath, and the daemon's classpath is
+    // Gradle's: slf4j, guava, asm, commons-io. Minecraft's LogUtils.getLogger() therefore
+    // bound to GRADLE's slf4j, whose LoggerFactory does a reflective binder search
+    // (ClassLoader.getResources), and the client died on the first log call with
+    // NoSuchMethodError. The source map proved it - it listed
+    // org/gradle/internal/logging/slf4j/OutputEventListenerBackedLoggerContext.java.
+    //
+    // The same delegation is why the JDK leaked in earlier; META-INF/teavm.properties
+    // handles that side. Forking gives TeaVM a process whose classpath is only what this
+    // build declares.
+    outOfProcess = true
+    // MUST stay false. The fast analysis over-approximates virtual call targets, and
+    // TeaVM decides which methods to compile as async state machines from that same call
+    // graph - so String's own char[] constructor came out async. Nothing there can suspend,
+    // but the split makes it pop a saved $ptr off the thread stack whenever it runs, and
+    // during a resume those frames belong to whoever is being resumed. The first
+    // Thread.sleep in PlatformRuntime.create came back to "Invalid recorded state" out of
+    // $rt_str, and the client never got past creating its canvas.
+    //
+    // The precise analysis did not fit in memory earlier in this port. It does now, because
+    // Swing, JNDI, DataFixerUpper, netty's transport and Realms are all out of the graph.
+    fastGlobalAnalysis = false
+    // The forked compiler needs what the precise analysis needs; 1024 was for 1.12.2.
+    processMemory = 24000
+    entryPointName = "main"
+    mainClass = "net.lax1dude.eaglercraft.internal.teavm.MainClass"
+    outputDir = file(folder)
+    properties = [ "java.util.TimeZone.autodetect": "true" ]
+    debugInformation = false
+}
+
+tasks.register('runclient', JavaExec) {
+    jvmArgs "-Djava.library.path=" + System.getProperty("user.dir") + "/desktopRuntime"
+    classpath = sourceSets.eagler.compileClasspath
+    group = "Eaglercraft-1.12"
+    description = "Runs the client"
+    classpath sourceSets.eagler.runtimeClasspath
+    if (System.getProperty("os.name").toLowerCase().contains("mac")) {
+        jvmArgs '-XstartOnFirstThread'
+    }
+
+    workingDir "./desktopRuntime"
+    main 'net.lax1dude.eaglercraft.internal.MainClass'
+}
+
+tasks.named('generateJavaScript') {
+    dependsOn 'niofileClasses'
+    // Out of process, TeaVM's compiler runs from daemonClasspath, which does not include
+    // src/teavmc-classpath/resources - and that directory is how this workspace overrides
+    // TeaVM's own internals: lax1dude's long.js, and the GraphUtils fix below it. Put it
+    // first there too, or both silently stop applying.
+    daemonClasspath.setFrom([files('src/teavmc-classpath/resources')]
+            + daemonClasspath.from.toList())
+    // The TeaVM plugin appends this project's compiled classes AFTER every dependency jar,
+    // and TeaVM reads the first match it finds. This port deliberately replaces one library
+    // class of its own - see src/teavm/java/org/teavm/jso/indexeddb/IDBIndex.java - so our
+    // output has to be searched first. `classpath.from` is the still-unresolved declaration,
+    // so re-stating it here reorders without forcing early resolution.
+    def declared = classpath.from.toList()
+    def ours = [sourceSets.niofile.output, sourceSets.main.output]
+    if (sourceSets.findByName('teavm') != null) {
+        ours << sourceSets.teavm.output
+    }
+    classpath.setFrom(ours + declared)
+}
+
+
+// TeaVM 0.9.2 emits a negative constant unparenthesised when it is negative ZERO.
+// RenderingContext.constantToString decides with `if (value < 0)`, and -0.0 < 0 is false in
+// IEEE arithmetic, so `x - (-0.0)` comes out as `x--0.0` - which JavaScript reads as a
+// decrement followed by a number, and the whole file fails to parse at that point. Every
+// other negative literal is parenthesised correctly (6,191 of them in this build).
+//
+// The class cannot simply be replaced the way GraphUtils was: 0.9.2's RenderingContext has a
+// different API from the version whose sources are available (its constantToString throws
+// IOException, and it has pushLocation/popLocation that later versions dropped), so a
+// backport would be a rewrite. Patching the output is smaller.
+//
+// The pattern is exactly `--0.0` and nothing wider, for a reason worth recording. Negative
+// zero is the ONLY value that reaches this bug - it is the only one for which `value < 0` is
+// false while Double.toString still writes a leading minus - so no other literal needs
+// fixing. A wider pattern is actively dangerous: `(--|\+\+)[0-9]` also matches inside the
+// Base64 blocks this file carries for the runtime deobfuscator, where `+` is a legal
+// character, and it hit 45 such places against one real defect. Base64 has no `.`, so
+// `--0.0` cannot occur there. Every site is logged so a future surprise is visible rather
+// than silent.
+tasks.register('fixNegativeZeroLiterals') {
+    doLast {
+        def js = file("javascript/classes.js")
+        if (!js.exists()) {
+            return
+        }
+        def text = js.getText("UTF-8")
+        def broken = ~/--(0\.0)/
+        int count = 0
+        text.eachMatch(broken) { count++ }
+        if (count > 0) {
+            // Log every site. A regex over the whole file could in principle land inside a
+            // string constant, and the only way to know it did not is to look at what it
+            // matched - so the build says, rather than patching silently.
+            def matcher = broken.matcher(text)
+            while (matcher.find()) {
+                int from = Math.max(0, matcher.start() - 40)
+                logger.lifecycle("  at {}: ...{}", matcher.start(),
+                        text.substring(from,
+                                Math.min(text.length(), matcher.start() + 10)))
+            }
+            def fixed = text.replaceAll(broken) { all, lit -> "- -" + lit }
+            js.setText(fixed, "UTF-8")
+            logger.lifecycle("fixNegativeZeroLiterals: separated {} negative-zero literal(s) "
+                    + "from the subtraction in front of them", count)
+        } else {
+            logger.lifecycle("fixNegativeZeroLiterals: nothing to fix")
+        }
+    }
+}
+
+tasks.named('generateJavaScript').configure {
+    finalizedBy 'fixNegativeZeroLiterals'
+}
+
+
+
+
+
+
+tasks.register('whoHasMain') {
+    doLast {
+        def want = "net/minecraft/client/main/Main.class"
+        int i = 0
+        tasks.getByName('generateJavaScript').classpath.each { f ->
+            i++
+            try {
+                if (f.isDirectory()) {
+                    if (new File(f, want).exists()) { println i + " DIR " + f }
+                } else if (f.name.endsWith(".jar")) {
+                    def zf = new java.util.zip.ZipFile(f)
+                    if (zf.getEntry(want) != null) { println i + " JAR " + f }
+                    zf.close()
+                }
+            } catch (Exception e) { }
+        }
+        println "total entries: " + tasks.getByName('generateJavaScript').classpath.files.size()
+    }
+}
